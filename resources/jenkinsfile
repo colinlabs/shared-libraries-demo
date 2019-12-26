@@ -1,0 +1,76 @@
+import com.piper.Constants
+def gconst= new Constants()
+
+properties([
+    parameters([
+        choice(choices: gconst.DEPLOY_ENV, description: 'deploy environment', name: 'DEPLOY_ENV'),
+        choice(choices: gconst.DEPLOY_TYPE, description: 'deploy type', name: 'DEPLOY_TYPE'),
+        ]),
+ ])
+
+ pipeCheck.preCheck()
+
+ pipeStage("Checkout") {
+    echo "git clone from gitlab..."
+    // 不完全解耦，代码仓库中放入一个Jenkinfile，内容为: pipeTrigger()
+    if (env.GIT_REPO == "") {
+        pipeLog.debug("Clone with checkout")
+        checkout scm
+    } else {
+    // 完全解耦
+        pipeLog.debug("Clone with repo url")
+        git url: env.GIT_REPO
+    }
+
+    sh 'ls -la'
+ }
+
+pipeStage("Compile") {
+    parallel 'amd64': {
+        echo "compile amd64"
+    }, 'arm': {
+        echo "compile arm"
+    }, 's390x': {
+        echo "compile s390x"
+    }
+}
+
+pipeStage("Build") {
+    parallel 'Docker': {
+        pipeStage("Docker") {
+            pipeBuild.docker()
+        }
+    }, 'Maven': {
+        pipeStage("Maven") {
+            pipeBuild.maven()
+        }
+    }
+}
+
+pipeStage("Test") {
+    parallel 'Benchmark': {
+        pipeStage('Benchmark') {
+            echo "Test with Benchmark"
+        }
+    }, 'ABTest': {
+        pipeStage('ABTest') {
+            echo "Test with ABTest"
+        }
+    }, 'Unit': {
+        pipeStage("Unit") {
+            echo "Test with Unit"
+        }
+    }
+}
+
+pipeStage("k8s") {
+    echo "deploy k8s..."
+}
+pipeStage("Deploy") {
+    if (env.DEPLOY_TYPE == "rolling-update") {
+    pipeDeploy.rollingUpdate()
+    }
+    if (env.DEPLOY_TYPE == "blue-green") {
+        pipeDeploy.blueGreen()
+    }
+ }
